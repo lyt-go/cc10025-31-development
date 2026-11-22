@@ -12,10 +12,12 @@
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端
 │   ├── src/views/WorkbenchView.vue|tsx  全部模块共享工作台
 │   ├── src/data/modules.ts              18个业务模块配置
+│   ├── src/domain/<模块>.ts             模块级领域差异（补数版本流等）
 │   ├── src/api/              统一请求封装
 │   └── vite.config.ts        dev server 配置（open: false）
 ├── backend/                  FastAPI（Python） 后端
 │   ├── app/routers/resource.py  通用查询/导出/登记/动作接口
+│   ├── app/routers/backfill_compat.py  补数兼容版本索引接口
 │   ├── app/services/<key>.py    每个模块独立领域逻辑
 │   ├── app/services/base.py     共享服务骨架
 │   └── app/store.py          内存数据仓库与示例数据
@@ -68,6 +70,27 @@ npm run dev
 | 质量报告 | `quality_report` | 质量报告 | 报告编号、关联资产、检核时间 |
 | 回收清理 | `reclaim_job` | 回收任务 | 任务编号、目标资产、回收范围 |
 | 变更通知 | `change_notice` | 变更通知 | 通知编号、关联资产、变更类型 |
+
+## 补数兼容版本索引
+
+Schema 注册不再只按资产取当前版本：历史分区的字段需求会与全部已注册旧版本
+逐一比较，生成可定位可用结构的补数兼容版本索引。同一个旧分区可能同时命中
+「恢复原字段」和「旧字段+衍生列」两个可用版本，值班人基于索引结果完成字段
+校验后提交实际读取的版本；补数任务按索引核定所用版本，把实际写入的字段清单
+和来源分区记入执行记录，已有作业始终按当时选择的版本重跑，未经验证的列不会
+出现在结果里。
+
+接口（`app/routers/backfill_compat.py`）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/backfill-compat/candidates?asset_id=&partition=&required=` | 按旧分区字段要求过滤候选，返回版本排序、覆盖列、核验结果 |
+| POST | `/api/backfill-compat/validate` | 字段校验：`verified_extra` 里显式确认的衍生列才进入可写入清单 |
+| POST | `/api/backfill-compat/bind` | 值班人提交实际读取的版本，校验通过后固定到补数作业 |
+| GET | `/api/backfill-compat/jobs/{job_id}/execution` | 复查补数执行记录：所用版本、实际写入字段清单、来源分区、历次执行 |
+
+验收流程见 `backend/test_backfill_compat.py`：过滤候选 → 字段校验 → 提交版本
+→ 核定执行 → 模拟再注册一个 Schema 后复查补数记录并重跑。
 
 ## 约定
 
